@@ -2,7 +2,7 @@ import streamlit as st
 import cv2
 import numpy as np
 from PIL import Image
-from pyzbar.pyzbar import decode
+# from pyzbar.pyzbar import decode
 from urllib.parse import urlparse
 import fitz  # PyMuPDF
 
@@ -44,13 +44,15 @@ def analyze_url_heuristically(url):
     return 3, "CAUTION: Unverified destination. Check URL carefully."
 
 def analyze_qr(uploaded_file):
-    """Decodes QR code from image."""
     uploaded_file.seek(0)
     file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, 1)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    decoded_objects = decode(gray)
-    return decoded_objects[0].data.decode('utf-8') if decoded_objects else None
+
+    # Use OpenCV's built-in QR detector
+    detector = cv2.QRCodeDetector()
+    data, bbox, straight_qrcode = detector.detectAndDecode(img)
+
+    return data if data else None
 
 # --- UI Layout ---
 
