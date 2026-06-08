@@ -3,29 +3,13 @@ import cv2
 import numpy as np
 from PIL import Image
 from pyzbar.pyzbar import decode
-import fitz
-import io
+from urllib.parse import urlparse
+import fitz  # PyMuPDF
 
 # --- Logic Modules ---
 
-def get_safety_rating(url):
-    """
-    Evaluates URL safety.
-    Replace the internal lists with an API call (e.g., VirusTotal) for real-world use.
-    """
-    # Simulated Fraud/Safe Lists
-    malicious_keywords = ["nuevo-core.com", "phish", "scam", "bit.ly/malicious"]
-    safe_domains = ["google.com", "microsoft.com", "github.com", "wikipedia.org"]
-    
-    if any(site in url for site in malicious_keywords):
-        return 1, "CRITICAL: Potential Fraud/Spam Link Detected!"
-    elif any(site in url for site in safe_domains):
-        return 5, "SAFE: Verified Trusted Domain."
-    else:
-        return 3, "CAUTION: Unverified URL. Analyze before proceeding."
-
 def get_metadata(uploaded_file):
-    # Reset file pointer to beginning for processing
+    """Extracts metadata from Images or PDFs."""
     uploaded_file.seek(0)
     file_type = uploaded_file.type
     if "image" in file_type:
@@ -36,17 +20,43 @@ def get_metadata(uploaded_file):
         return doc.metadata
     return {"Error": "Unsupported file format."}
 
+def analyze_url_heuristically(url):
+    """Analyzes a URL for fraud patterns using heuristic checks."""
+    parsed = urlparse(url)
+    domain = parsed.netloc.lower()
+    
+    # 1. Define Trust Lists
+    trusted_domains = ["google.com", "gpay.app", "pay.google.com", "assistant.google.com"]
+    
+    # 2. Check for exact match or legitimate subdomains
+    is_trusted = any(domain == td or domain.endswith("." + td) for td in trusted_domains)
+    if is_trusted:
+        return 5, "SAFE: The domain is verified and trusted."
+    
+    # 3. Detect "Brand Impersonation"
+    if "gpay" in domain or "google" in domain:
+        return 1, "CRITICAL: Brand Impersonation detected! Likely a phishing attempt."
+    
+    # 4. Check for common suspicious signs
+    if len(domain) > 20 or "-" in domain:
+        return 2, "WARNING: Suspicious URL structure (lengthy or contains hyphens)."
+        
+    return 3, "CAUTION: Unverified destination. Check URL carefully."
+
 def analyze_qr(uploaded_file):
+    """Decodes QR code from image."""
     uploaded_file.seek(0)
     file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, 1)
-    decoded_objects = decode(img)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    decoded_objects = decode(gray)
     return decoded_objects[0].data.decode('utf-8') if decoded_objects else None
 
-# --- Streamlit UI ---
+# --- UI Layout ---
 
 st.set_page_config(page_title="Security Analysis Toolkit", layout="centered")
 st.title("🛡️ Security Analysis Toolkit")
+
 option = st.sidebar.selectbox("Choose Tool", ["QR Code Fraud Detection", "Metadata Extractor"])
 
 if option == "QR Code Fraud Detection":
@@ -56,27 +66,22 @@ if option == "QR Code Fraud Detection":
     if qr_file:
         data = analyze_qr(qr_file)
         if data:
+            st.success(f"Detected Content: {data}")
+            
             if data.startswith("http"):
-                rating, msg = get_safety_rating(data)
+                rating, msg = analyze_url_heuristically(data)
                 
-                # Logic for visual feedback
-                if rating == 1:
-                    bg_color = "#FF4B4B" # Red
-                elif rating == 3:
-                    bg_color = "#FFA500" # Orange
-                else:
-                    bg_color = "#00CC96" # Green
+                # Dynamic coloring
+                bg_color = "#FF4B4B" if rating <= 2 else ("#FFA500" if rating == 3 else "#00CC96")
                 
                 st.markdown(f"""
                 <div style="background-color: {bg_color}; padding: 15px; border-radius: 10px; color: white;">
-                    <h4 style="color: white;">Scan Result:</h4>
-                    <p><strong>Content:</strong> {data}</p>
-                    <p><strong>Safety Rating:</strong> {rating}/5</p>
-                    <p><strong>Status:</strong> {msg}</p>
+                    <strong>Safety Rating:</strong> {rating}/5<br>
+                    <strong>Status:</strong> {msg}
                 </div>
                 """, unsafe_allow_html=True)
             else:
-                st.info(f"Detected Text: {data}")
+                st.info("The QR code contains plain text, not a URL.")
         else:
             st.error("No QR Code detected in the image.")
 
